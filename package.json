@@ -6,9 +6,12 @@
   "description": "Generic high-volatility 5x5 line-slot math package scaffold",
   "main": "src/index.ts",
   "scripts": {
-    "build": "echo 'build scaffold pending'",
-    "sim": "echo 'simulation scaffold pending'",
-    "test": "echo 'tests scaffold pending'"
+    "build": "tsc -p tsconfig.json",
+    "sim": "echo 'simulation pass pending'",
+    "test": "echo 'tests pending'"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3"
   },
   "license": "MIT"
 }
