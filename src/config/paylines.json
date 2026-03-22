@@ -1,0 +1,26 @@
+{
+  "grid": {
+    "rows": 5,
+    "reels": 5,
+    "row_indexing": "top_to_bottom_1_to_5"
+  },
+  "paylines": [
+    { "line": 1,  "stops": [1, 1, 1, 1, 1] },
+    { "line": 2,  "stops": [2, 2, 2, 2, 2] },
+    { "line": 3,  "stops": [3, 3, 3, 3, 3] },
+    { "line": 4,  "stops": [4, 4, 4, 4, 4] },
+    { "line": 5,  "stops": [5, 5, 5, 5, 5] },
+
+    { "line": 6,  "stops": [1, 2, 3, 4, 5] },
+    { "line": 7,  "stops": [5, 4, 3, 2, 1] },
+    { "line": 8,  "stops": [1, 2, 1, 2, 1] },
+
+    { "line": 9,  "stops": [2, 1, 2, 1, 2] },
+    { "line": 10, "stops": [2, 3, 2, 3, 2] },
+    { "line": 11, "stops": [3, 2, 3, 2, 3] },
+    { "line": 12, "stops": [3, 4, 3, 4, 3] },
+    { "line": 13, "stops": [4, 3, 4, 3, 4] },
+    { "line": 14, "stops": [5, 4, 5, 4, 5] },
+    { "line": 15, "stops": [4, 5, 4, 5, 4] }
+  ]
+}

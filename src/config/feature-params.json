@@ -1,0 +1,46 @@
+{
+  "targets": {
+    "rtp": 96.5,
+    "max_win_x": 12500,
+    "volatility": "high"
+  },
+  "buy_modes": {
+    "base": { "cost": 1.0 },
+    "train": { "cost": 80.0 },
+    "duel": { "cost": 200.0 },
+    "dead": { "cost": 400.0 }
+  },
+  "scatter_trigger": {
+    "train": { "symbol": "SC_TRAIN", "min_count": 3, "spins": 10, "retrigger": false },
+    "duel": { "symbol": "SC_DUEL", "min_count": 3, "spins": 10, "retrigger": false },
+    "dead": { "symbol": "SC_DEAD", "min_count": 3, "retrigger": false }
+  },
+  "trigger_collision_policy": "DEAD_gt_DUEL_gt_TRAIN",
+  "train_mode": {
+    "sticky_wilds": true,
+    "vs_enabled": false
+  },
+  "duel_mode": {
+    "vs_enabled": true,
+    "vs_density_profile": "elevated_vs_base"
+  },
+  "dead_mode": {
+    "collect_phase": {
+      "reset_spins_on_collect": 3,
+      "end_after_consecutive_dead_spins": 3,
+      "collected_multiplier_start": 1,
+      "mult_symbol": "DMH_MULT",
+      "mult_values": [2, 3, 5, 10],
+      "mult_weights": [50, 30, 15, 5],
+      "mult_aggregation": "additive"
+    },
+    "showdown_phase": {
+      "spins": 3,
+      "apply_collected_wild_count": true,
+      "apply_total_collected_multiplier": true
+    }
+  },
+  "caps": {
+    "max_win_enforced": true
+  }
+}
