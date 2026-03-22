@@ -49,7 +49,28 @@ export interface SpinResult {
 type Position = { reel: number; row: number };
 
 const MAX_WIN_X = 12_500;
+const MODE_PAYOUT_SCALE: Record<Mode, number> = {
+  base: 0.1185,
+  train: 0.62,
+  duel: 1.0,
+  dead: 0.0063,
+};
 const VS_MULTIPLIERS = [2, 3, 4, 5, 6, 7, 8, 9, 10, 20, 25, 50, 100] as const;
+const VS_MULTIPLIER_WEIGHTS: Array<[number, number]> = [
+  [2, 30],
+  [3, 20],
+  [4, 14],
+  [5, 10],
+  [6, 7],
+  [7, 5],
+  [8, 4],
+  [9, 3],
+  [10, 2],
+  [20, 2],
+  [25, 1],
+  [50, 1],
+  [100, 1],
+];
 
 const PAYLINES: number[][] = [
   [1, 1, 1, 1, 1],
@@ -86,62 +107,67 @@ const LINE_PAYTABLE: Record<string, Record<number, number>> = {
 const PAYING_SYMBOLS = ['P1', 'P2', 'P3', 'P4', 'P5', 'L1', 'L2', 'L3', 'L4', 'L5', 'WILD'] as const;
 
 const BASE_WEIGHTS: Array<[SymbolCode, number]> = [
-  ['P1', 3],
-  ['P2', 4],
-  ['P3', 6],
-  ['P4', 8],
-  ['P5', 10],
-  ['L1', 12],
-  ['L2', 13],
-  ['L3', 14],
-  ['L4', 16],
-  ['L5', 18],
-  ['WILD', 3],
-  ['VS', 2],
-  ['SC_TRAIN', 1],
-  ['SC_DUEL', 1],
-  ['SC_DEAD', 1],
+  ['BLANK', 380],
+  ['L5', 120],
+  ['L4', 110],
+  ['L3', 100],
+  ['L2', 90],
+  ['L1', 80],
+  ['P5', 40],
+  ['P4', 30],
+  ['P3', 24],
+  ['P2', 16],
+  ['P1', 12],
+  ['WILD', 20],
+  ['VS', 3],
+  ['SC_TRAIN', 8],
+  ['SC_DUEL', 8],
+  ['SC_DEAD', 8],
 ];
 
 const TRAIN_WEIGHTS: Array<[SymbolCode, number]> = [
-  ['P1', 3],
-  ['P2', 4],
-  ['P3', 6],
-  ['P4', 8],
-  ['P5', 10],
-  ['L1', 12],
-  ['L2', 13],
-  ['L3', 14],
-  ['L4', 16],
-  ['L5', 18],
-  ['WILD', 5],
+  ['BLANK', 360],
+  ['L5', 135],
+  ['L4', 123],
+  ['L3', 112],
+  ['L2', 100],
+  ['L1', 90],
+  ['P5', 50],
+  ['P4', 40],
+  ['P3', 30],
+  ['P2', 22],
+  ['P1', 14],
+  ['WILD', 70],
 ];
 
 const DUEL_WEIGHTS: Array<[SymbolCode, number]> = [
-  ['P1', 3],
-  ['P2', 4],
-  ['P3', 6],
-  ['P4', 8],
-  ['P5', 10],
-  ['L1', 12],
-  ['L2', 13],
-  ['L3', 14],
-  ['L4', 16],
-  ['L5', 18],
-  ['WILD', 3],
-  ['VS', 5],
+  ['BLANK', 280],
+  ['L5', 130],
+  ['L4', 120],
+  ['L3', 110],
+  ['L2', 100],
+  ['L1', 90],
+  ['P5', 45],
+  ['P4', 35],
+  ['P3', 28],
+  ['P2', 20],
+  ['P1', 14],
+  ['WILD', 18],
+  ['VS', 35],
 ];
 
 interface TrainState {
   mode: 'train';
   spinsRemaining: number;
   stickyPositions: Position[];
+  accumulatedPayoutX: number;
   cursor: number;
 }
 
 interface DuelState {
   mode: 'duel';
   spinsRemaining: number;
+  accumulatedPayoutX: number;
   cursor: number;
 }
 
@@ -153,6 +179,7 @@ interface DeadState {
   collectedWildCount: number;
   collectedMultiplier: number;
   showdownSpinsRemaining: number;
+  accumulatedPayoutX: number;
   cursor: number;
 }
 
@@ -175,6 +202,7 @@ function normalizeTrainState(state: Record<string, unknown> | undefined): TrainS
     mode: 'train',
     spinsRemaining: Math.max(0, Math.floor(toNumber(s.spinsRemaining, 10))),
     stickyPositions,
+    accumulatedPayoutX: Math.max(0, toNumber(s.accumulatedPayoutX, 0)),
     cursor: Math.max(0, Math.floor(toNumber(s.cursor, 0))),
   };
 }
@@ -184,6 +212,7 @@ function normalizeDuelState(state: Record<string, unknown> | undefined): DuelSta
   return {
     mode: 'duel',
     spinsRemaining: Math.max(0, Math.floor(toNumber(s.spinsRemaining, 10))),
+    accumulatedPayoutX: Math.max(0, toNumber(s.accumulatedPayoutX, 0)),
     cursor: Math.max(0, Math.floor(toNumber(s.cursor, 0))),
   };
 }
@@ -198,6 +227,7 @@ function normalizeDeadState(state: Record<string, unknown> | undefined): DeadSta
     collectedWildCount: Math.max(0, Math.floor(toNumber(s.collectedWildCount, 0))),
     collectedMultiplier: Math.max(1, Math.floor(toNumber(s.collectedMultiplier, 1))),
     showdownSpinsRemaining: Math.max(0, Math.floor(toNumber(s.showdownSpinsRemaining, 3))),
+    accumulatedPayoutX: Math.max(0, toNumber(s.accumulatedPayoutX, 0)),
     cursor: Math.max(0, Math.floor(toNumber(s.cursor, 0))),
   };
 }
@@ -292,10 +322,7 @@ function expandVsReels(
     const test = evaluateLines(candidate, {});
     if (test.totalPayoutX > 0) {
       working = candidate;
-      expanded[reel] = weightedPick(
-        rng,
-        VS_MULTIPLIERS.map((m) => [m, 1]),
-      );
+      expanded[reel] = weightedPick(rng, VS_MULTIPLIER_WEIGHTS);
     }
   }
 
@@ -382,6 +409,21 @@ function capWin(totalPayoutX: number): { payoutMultiplier: number; cappedByMaxWi
   return { payoutMultiplier: totalPayoutX, cappedByMaxWin: false };
 }
 
+function capSpinInRound(rawPayoutX: number, accumulatedPayoutX: number): {
+  payoutMultiplier: number;
+  newAccumulatedPayoutX: number;
+  cappedByMaxWin: boolean;
+} {
+  const remaining = Math.max(0, MAX_WIN_X - accumulatedPayoutX);
+  const payoutMultiplier = Math.min(rawPayoutX, remaining);
+  const newAccumulatedPayoutX = accumulatedPayoutX + payoutMultiplier;
+  return {
+    payoutMultiplier,
+    newAccumulatedPayoutX,
+    cappedByMaxWin: rawPayoutX > payoutMultiplier || remaining <= 0,
+  };
+}
+
 function startFeatureFromBase(grid: SymbolCode[][]): { mode?: Mode; state?: Record<string, unknown>; trigger?: string } {
   const train = countSymbol(grid, 'SC_TRAIN') >= 3;
   const duel = countSymbol(grid, 'SC_DUEL') >= 3;
@@ -399,6 +441,7 @@ function startFeatureFromBase(grid: SymbolCode[][]): { mode?: Mode; state?: Reco
         collectedWildCount: 0,
         collectedMultiplier: 1,
         showdownSpinsRemaining: 3,
+        accumulatedPayoutX: 0,
         cursor: 0,
       },
     };
@@ -408,7 +451,7 @@ function startFeatureFromBase(grid: SymbolCode[][]): { mode?: Mode; state?: Reco
     return {
       mode: 'duel',
       trigger: 'SC_DUEL',
-      state: { mode: 'duel', spinsRemaining: 10, cursor: 0 },
+      state: { mode: 'duel', spinsRemaining: 10, accumulatedPayoutX: 0, cursor: 0 },
     };
   }
 
@@ -416,7 +459,7 @@ function startFeatureFromBase(grid: SymbolCode[][]): { mode?: Mode; state?: Reco
     return {
       mode: 'train',
       trigger: 'SC_TRAIN',
-      state: { mode: 'train', spinsRemaining: 10, stickyPositions: [], cursor: 0 },
+      state: { mode: 'train', spinsRemaining: 10, stickyPositions: [], accumulatedPayoutX: 0, cursor: 0 },
     };
   }
 
@@ -472,7 +515,12 @@ function baseSpin(input: SpinInput): SpinResult {
 
   const evalResult = evaluateLines(grid, vs.expanded);
   const feature = startFeatureFromBase(grid);
-  const capped = capWin(evalResult.totalPayoutX);
+  const scaled = evalResult.totalPayoutX * MODE_PAYOUT_SCALE.base;
+  const capped = capWin(scaled);
+
+  const nextState = feature.state
+    ? ({ ...feature.state, accumulatedPayoutX: capped.payoutMultiplier } as Record<string, unknown>)
+    : undefined;
 
   return {
     mode: 'base',
@@ -487,7 +535,7 @@ function baseSpin(input: SpinInput): SpinResult {
         ? [{ type: 'FEATURE_TRIGGERED', feature: feature.mode, trigger: feature.trigger }]
         : []),
     ],
-    nextState: feature.state,
+    nextState,
   };
 }
 
@@ -514,8 +562,10 @@ function trainSpin(input: SpinInput): SpinResult {
   const stickyPositions = uniquePositions([...state.stickyPositions, ...newlyLandedWilds]);
 
   const evalResult = evaluateLines(grid, {});
-  const capped = capWin(evalResult.totalPayoutX);
-  const spinsRemaining = Math.max(0, state.spinsRemaining - 1);
+  const scaled = evalResult.totalPayoutX * MODE_PAYOUT_SCALE.train;
+  const capped = capSpinInRound(scaled, state.accumulatedPayoutX);
+  const hitRoundCap = capped.newAccumulatedPayoutX >= MAX_WIN_X;
+  const spinsRemaining = hitRoundCap ? 0 : Math.max(0, state.spinsRemaining - 1);
 
   return {
     mode: 'train',
@@ -532,6 +582,7 @@ function trainSpin(input: SpinInput): SpinResult {
       mode: 'train',
       spinsRemaining,
       stickyPositions,
+      accumulatedPayoutX: capped.newAccumulatedPayoutX,
       cursor: state.cursor + 1,
     },
   };
@@ -558,8 +609,10 @@ function duelSpin(input: SpinInput): SpinResult {
   grid = vs.grid;
 
   const evalResult = evaluateLines(grid, vs.expanded);
-  const capped = capWin(evalResult.totalPayoutX);
-  const spinsRemaining = Math.max(0, state.spinsRemaining - 1);
+  const scaled = evalResult.totalPayoutX * MODE_PAYOUT_SCALE.duel;
+  const capped = capSpinInRound(scaled, state.accumulatedPayoutX);
+  const hitRoundCap = capped.newAccumulatedPayoutX >= MAX_WIN_X;
+  const spinsRemaining = hitRoundCap ? 0 : Math.max(0, state.spinsRemaining - 1);
 
   return {
     mode: 'duel',
@@ -576,7 +629,12 @@ function duelSpin(input: SpinInput): SpinResult {
       },
       ...(spinsRemaining === 0 ? [{ type: 'FEATURE_COMPLETE', feature: 'duel' }] : []),
     ],
-    nextState: { mode: 'duel', spinsRemaining, cursor: state.cursor + 1 },
+    nextState: {
+      mode: 'duel',
+      spinsRemaining,
+      accumulatedPayoutX: capped.newAccumulatedPayoutX,
+      cursor: state.cursor + 1,
+    },
   };
 }
 
@@ -599,9 +657,9 @@ function deadSpin(input: SpinInput): SpinResult {
 
   if (state.phase === 'collect') {
     const collectWeights: Array<[SymbolCode, number]> = [
-      ['WILD', 10],
-      ['DMH_MULT', 8],
-      ['BLANK', 82],
+      ['WILD', 3],
+      ['DMH_MULT', 4],
+      ['BLANK', 93],
     ];
     const grid = makeGrid(rng, collectWeights);
 
@@ -624,7 +682,7 @@ function deadSpin(input: SpinInput): SpinResult {
     const consecutiveDeadSpins = anyCollect ? 0 : state.consecutiveDeadSpins + 1;
     const collectSpinsRemaining = anyCollect ? 3 : Math.max(0, state.collectSpinsRemaining - 1);
 
-    const toShowdown = consecutiveDeadSpins >= 3 || collectSpinsRemaining === 0;
+    const toShowdown = consecutiveDeadSpins >= 3 || collectSpinsRemaining === 0 || state.cursor >= 25;
     const nextState: DeadState = {
       ...state,
       phase: toShowdown ? 'showdown' : 'collect',
@@ -675,17 +733,18 @@ function deadSpin(input: SpinInput): SpinResult {
   }
 
   const showdownBaseWeights: Array<[SymbolCode, number]> = [
-    ['P1', 3],
-    ['P2', 4],
-    ['P3', 6],
-    ['P4', 8],
-    ['P5', 10],
-    ['L1', 12],
-    ['L2', 13],
-    ['L3', 14],
-    ['L4', 16],
-    ['L5', 18],
-    ['WILD', 3],
+    ['BLANK', 500],
+    ['P1', 10],
+    ['P2', 15],
+    ['P3', 22],
+    ['P4', 30],
+    ['P5', 38],
+    ['L1', 54],
+    ['L2', 60],
+    ['L3', 66],
+    ['L4', 72],
+    ['L5', 78],
+    ['WILD', 20],
   ];
 
   let grid = makeGrid(rng, showdownBaseWeights);
@@ -693,13 +752,16 @@ function deadSpin(input: SpinInput): SpinResult {
 
   const evalResult = evaluateLines(grid, {});
   const multiplied = evalResult.totalPayoutX * state.collectedMultiplier;
-  const capped = capWin(multiplied);
+  const scaled = multiplied * MODE_PAYOUT_SCALE.dead;
+  const capped = capSpinInRound(scaled, state.accumulatedPayoutX);
+  const hitRoundCap = capped.newAccumulatedPayoutX >= MAX_WIN_X;
 
-  const showdownSpinsRemaining = Math.max(0, state.showdownSpinsRemaining - 1);
+  const showdownSpinsRemaining = hitRoundCap ? 0 : Math.max(0, state.showdownSpinsRemaining - 1);
   const nextState: DeadState = {
     ...state,
     phase: showdownSpinsRemaining === 0 ? 'complete' : 'showdown',
     showdownSpinsRemaining,
+    accumulatedPayoutX: capped.newAccumulatedPayoutX,
     cursor: state.cursor + 1,
   };
 
